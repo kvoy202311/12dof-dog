@@ -44,8 +44,8 @@ AXIS_VY   = 0    # 左摇杆左右
 AXIS_YAW  = 2    # 右摇杆左右，直接作为偏航角速度指令
 
 # 速度范围限制
-VX_MAX   = 2.0     # 最大前进速度 m/s
-VY_MAX   = 1.2    # 最大横移速度 m/s
+VX_MAX   = 1.0     # 最大前进速度 m/s
+VY_MAX   = 1.0    # 最大横移速度 m/s
 YAW_MAX  = 2.0    # 最大偏航角速度指令 rad/s
 
 # 死区（手柄摇杆归零时可能不是精确的0）
@@ -294,10 +294,15 @@ def main():
                 sim_time = data.time
                 real_time = time.time() - start_time
                 base_height = data.qpos[2]
+                imu_acc = data.sensor('imu_acc').data.copy().astype(np.float32)
+                gravity_body = get_projected_gravity(data, body_name="base_link") * 9.81
+                imu_acc_nograv = imu_acc - gravity_body
                 print(f"[t={sim_time:6.2f}s] "
                       f"h={base_height:.3f}  "
                       f"cmd=[{cmd[0]:+.2f}, {cmd[1]:+.2f}, {cmd[2]:+.2f}]  "
-                      f"|a|={np.linalg.norm(action):.3f}")
+                    f"|a|={np.linalg.norm(action):.3f}  "
+                    f"acc_body=[{imu_acc[0]:+.2f}, {imu_acc[1]:+.2f}, {imu_acc[2]:+.2f}]  "
+                    f"acc_body_nograv=[{imu_acc_nograv[0]:+.2f}, {imu_acc_nograv[1]:+.2f}, {imu_acc_nograv[2]:+.2f}]")
                 # print(f"[t={sim_time:6.2f}s | real={real_time:6.2f}s] "
                 #       f"height={base_height:.3f}  "
                 #       f"action_norm={np.linalg.norm(action):.3f}")
