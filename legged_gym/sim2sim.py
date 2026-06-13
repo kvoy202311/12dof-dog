@@ -95,7 +95,7 @@ def get_gamepad_cmd(js) -> np.ndarray:
 
 # ======================== 配置 ========================
 MODEL_PATH = "/home/kang/Desktop/RC_blind_terrain/legged_gym/resources/robots/RCV8/xml/scene.xml"
-POLICY_PATH = "/home/kang/Desktop/RC_blind_terrain/legged_gym/logs/blindrough/exported/policies/policy.pt"
+POLICY_PATH = "/home/kang/Desktop/RC_blind_terrain/legged_gym/logs/blindrough2/exported/policies/policy.pt"
 
 DT = 0.02           # 控制频率 50Hz
 DECIMATION = 4       # 与训练一致

@@ -77,8 +77,8 @@ class RCCfg(LeggedRobotCfg):
     class control(LeggedRobotCfg.control):
         # PD Drive parameters:
         control_type = 'P' 
-        stiffness = {'joint': 35.0}  # 位置刚度 Kp，单位 N*m/rad；
-        damping = {'joint': 0.9}     # 速度阻尼 Kd，单位 N*m*s/rad；
+        stiffness = {'joint': 32.0}  # 位置刚度 Kp，单位 N*m/rad；
+        damping = {'joint': 0.72}     # 速度阻尼 Kd，单位 N*m*s/rad；
         # action scale: target angle = actionScale * action + defaultAngle
         action_scale = 0.25  # 动作缩放系数；策略输出会先乘该值，再叠加到默认关节角上作为目标角
         # decimation: Number of control action updates @ sim DT per policy DT
@@ -87,7 +87,7 @@ class RCCfg(LeggedRobotCfg):
 
     # 机器人资产与碰撞配置
     class asset(LeggedRobotCfg.asset):
-        file = '{LEGGED_GYM_ROOT_DIR}/resources/robots/RCV8/urdf/RCV8.urdf'  # URDF 机器人模型路径
+        file = '{LEGGED_GYM_ROOT_DIR}/resources/robots/RCV2/urdf/RCV2.urdf'  # URDF 机器人模型路径
         name = "rc"  # 机器人资产名称；创建 actor 时使用
         foot_name = "foot"  # 足端刚体名称匹配关键字；用于寻找 feet_indices
         penalize_contacts_on = ["thigh", "calf", "base"]  # 这些刚体发生接触时计入碰撞惩罚
@@ -169,9 +169,9 @@ class RCCfg(LeggedRobotCfg):
         soft_dof_pos_limit = 0.9 # 软位置限位比例；超过 URDF 极限 90% 后开始进入惩罚区
         soft_dof_vel_limit = 0.9  # 软速度限位比例；超过速度极限 90% 后开始进入惩罚区
         soft_torque_limit = 0.9  # 软力矩限位比例；超过力矩极限 90% 后开始进入惩罚区
-        base_height_target = 0.34  # 机身目标高度，单位米；base_height 奖励围绕该值计算
+        base_height_target = 0.30  # 机身目标高度，单位米；base_height 奖励围绕该值计算
         max_contact_force = 100. # 最大允许接触力阈值；超过后可进入接触力惩罚
-        clearance_height_target = -0.2  # 足端目标净空高度，单位米；foot_clearance 奖励围绕该值计算
+        clearance_height_target = -0.18  # 足端目标净空高度，单位米；foot_clearance 奖励围绕该值计算
 
     # 观测与动作归一化配置
     class normalization(LeggedRobotCfg.normalization):
@@ -257,14 +257,14 @@ class RCCfgPPO(LeggedRobotCfgPPO):
         policy_class_name = 'HIMActorCritic'  # 策略类名
         algorithm_class_name = 'HIMPPO'  # 算法类名
         num_steps_per_env = 48 # 每次迭代每个环境采样的步数
-        max_iterations = 100000 # 最大策略更新迭代次数
+        max_iterations = 20000 # 最大策略更新迭代次数
 
         # logging
         save_interval = 100 # 模型保存检查间隔；每这么多次迭代检查一次是否保存
-        experiment_name = 'blindrough'  # 实验名称；决定日志主目录名
+        experiment_name = 'blindrough2'  # 实验名称；决定日志主目录名
         run_name = ''  # 当前运行名称；会拼接到日志目录名后面
         # load and resume
-        resume = False  # 是否从已有 checkpoint 恢复训练
+        resume = True  # 是否从已有 checkpoint 恢复训练
         load_run = -1 # 要加载的 run；-1 表示自动选择最新 run
         checkpoint = -1 # 要加载的 checkpoint；-1 表示自动选择最新 checkpoint
         resume_path = None # 恢复路径；通常由 load_run 和 checkpoint 自动解析生成
