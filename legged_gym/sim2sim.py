@@ -13,24 +13,24 @@ def wrap_to_pi(angle):
     return (angle + np.pi) % (2.0 * np.pi) - np.pi
 
 
-def get_body_id(model, body_name="base_link"):
+def get_body_id(model, body_name="base"):
     body_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_BODY, body_name)
     if body_id < 0:
         raise ValueError(f"Body '{body_name}' not found in MuJoCo model.")
     return body_id
 
 
-def get_base_rotmat(data, body_name="base_link"):
+def get_base_rotmat(data, body_name="base"):
     body_id = get_body_id(data.model, body_name)
     return data.xmat[body_id].reshape(3, 3).copy()
 
 
-def get_base_yaw(data, body_name="base_link"):
+def get_base_yaw(data, body_name="base"):
     rot = get_base_rotmat(data, body_name)
     return float(math.atan2(rot[1, 0], rot[0, 0]))
 
 
-def get_projected_gravity(data, body_name="base_link"):
+def get_projected_gravity(data, body_name="base"):
     # 训练里 projected_gravity 的语义是：世界重力向量投到机体系
     rot = get_base_rotmat(data, body_name)  # body -> world
     gravity_world = np.array([0.0, 0.0, -1.0], dtype=np.float32)
@@ -58,7 +58,7 @@ def init_gamepad():
     pygame.joystick.init()
 
     if pygame.joystick.get_count() == 0:
-        print("⚠️  未检测到手柄，将使用固定指令")
+        print("⚠️  未检测到手柄，将启用键盘控制")
         return None
 
     js = pygame.joystick.Joystick(0)
@@ -93,9 +93,44 @@ def get_gamepad_cmd(js) -> np.ndarray:
 
     return np.array([vx, vy, yaw], dtype=np.float32)
 
+
+def init_keyboard():
+    """初始化键盘输入窗口。"""
+    pygame.display.init()
+    screen = pygame.display.set_mode((420, 120))
+    pygame.display.set_caption("sim2sim Keyboard Control")
+    screen.fill((30, 30, 30))
+    pygame.display.flip()
+    return screen
+
+
+def get_keyboard_cmd() -> np.ndarray:
+    """从键盘读取线速度指令和偏航角速度指令。"""
+    pygame.event.pump()
+    keys = pygame.key.get_pressed()
+
+    vx = 0.0
+    vy = 0.0
+    yaw = 0.0
+
+    if keys[pygame.K_w]:
+        vx += VX_MAX
+    if keys[pygame.K_s]:
+        vx -= VX_MAX
+    if keys[pygame.K_a]:
+        vy += VY_MAX
+    if keys[pygame.K_d]:
+        vy -= VY_MAX
+    if keys[pygame.K_q]:
+        yaw += YAW_MAX
+    if keys[pygame.K_e]:
+        yaw -= YAW_MAX
+
+    return np.array([vx, vy, yaw], dtype=np.float32)
+
 # ======================== 配置 ========================
-MODEL_PATH = "/home/kang/Desktop/RC_blind_terrain/legged_gym/resources/robots/RCV8/xml/scene.xml"
-POLICY_PATH = "/home/kang/Desktop/RC_blind_terrain/legged_gym/logs/blindrough2/exported/policies/policy.pt"
+MODEL_PATH = "/home/kang/Desktop/RC_blind_terrain/legged_gym/resources/robots/RCV3/xml/scene.xml"
+POLICY_PATH = "/home/kang/Desktop/RC_blind_terrain/legged_gym/logs/blindrough3/exported/policies/policy.pt"
 
 DT = 0.02           # 控制频率 50Hz
 DECIMATION = 4       # 与训练一致
@@ -133,8 +168,8 @@ DEFAULT_POS = np.array([
 ], dtype=np.float32)
 
 # PD 增益：与当前训练配置保持一致
-KP = np.full(NUM_ACTIONS, 25.0, dtype=np.float32)
-KD = np.full(NUM_ACTIONS, 0.6, dtype=np.float32)
+KP = np.full(NUM_ACTIONS, 35.0, dtype=np.float32)
+KD = np.full(NUM_ACTIONS, 0.8, dtype=np.float32)
 
 # 真机单关节最大力矩；与 MuJoCo XML 中的 actuator / joint 限幅保持一致
 TORQUE_LIMIT = 23.7
@@ -149,7 +184,7 @@ def get_obs(data, cmd, last_action):
     dq = data.qvel.astype(np.float32).copy()
 
     gyro = data.sensor('imu_gyro').data.copy().astype(np.float32)
-    projected_gravity = get_projected_gravity(data, body_name="base_link")
+    projected_gravity = get_projected_gravity(data, body_name="base")
 
     dof_pos = q[7:19]
     dof_vel = dq[6:18]
@@ -180,6 +215,9 @@ def build_obs_history(obs_history: np.ndarray, new_obs: np.ndarray) -> np.ndarra
 def main():
     # 初始化手柄
     gamepad = init_gamepad()
+    keyboard_screen = None
+    if gamepad is None:
+        keyboard_screen = init_keyboard()
 
     # 加载模型
     model = mujoco.MjModel.from_xml_path(MODEL_PATH)
@@ -209,10 +247,17 @@ def main():
         obs_history = build_obs_history(obs_history, init_obs)
 
     print("=" * 50)
-    print("🎮 手柄控制说明:")
-    print("   左摇杆 上下 → 前进/后退")
-    print("   左摇杆 左右 → 左右横移")
-    print("   右摇杆 左右 → 原地转向/偏航角速度")
+    if gamepad is not None:
+        print("🎮 手柄控制说明:")
+        print("   左摇杆 上下 → 前进/后退")
+        print("   左摇杆 左右 → 左右横移")
+        print("   右摇杆 左右 → 原地转向/偏航角速度")
+    else:
+        print("⌨️ 键盘控制说明:")
+        print("   W / S → 前进 / 后退")
+        print("   A / D → 左移 / 右移")
+        print("   Q / E → 左转 / 右转")
+        print("   注意：需要先点击一下 pygame 小窗口，确保键盘焦点在控制窗口内")
     print("=" * 50)
 
     step_count = 0
@@ -229,7 +274,7 @@ def main():
                 if gamepad is not None:
                     cmd = get_gamepad_cmd(gamepad)
                 else:
-                    cmd = CMD.copy()
+                    cmd = get_keyboard_cmd()
 
                 # 获取观测
                 current_obs = get_obs(data, cmd, last_action)
@@ -276,7 +321,7 @@ def main():
             viewer.cam.lookat[2] = robot_pos[2]
 
             # 摄像机方位角跟随 yaw（偏移0度表示从背后看）
-            viewer.cam.azimuth = yaw_deg + 0.0
+            viewer.cam.azimuth = yaw_deg + 90.0
             viewer.cam.elevation = -20.0
             viewer.cam.distance = 3.0
 
@@ -295,7 +340,7 @@ def main():
                 real_time = time.time() - start_time
                 base_height = data.qpos[2]
                 imu_acc = data.sensor('imu_acc').data.copy().astype(np.float32)
-                gravity_body = get_projected_gravity(data, body_name="base_link") * 9.81
+                gravity_body = get_projected_gravity(data, body_name="base") * 9.81
                 imu_acc_nograv = imu_acc - gravity_body
                 print(f"[t={sim_time:6.2f}s] "
                       f"h={base_height:.3f}  "
@@ -308,8 +353,9 @@ def main():
                 #       f"action_norm={np.linalg.norm(action):.3f}")
 
     # 退出时清理
-    if gamepad is not None:
-        pygame.quit()
+    if keyboard_screen is not None:
+        pygame.display.quit()
+    pygame.quit()
 
 
 if __name__ == "__main__":

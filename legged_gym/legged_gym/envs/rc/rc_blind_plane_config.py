@@ -1,13 +1,13 @@
 from legged_gym.envs.base.legged_robot_config import LeggedRobotCfg,LeggedRobotCfgPPO
 
 # RC 机器人环境配置
-class RCBlindTerrainCfg(LeggedRobotCfg):
+class RCBlindPlaneCfg(LeggedRobotCfg):
     # 环境基础配置
     class env(LeggedRobotCfg.env):
         num_envs = 4096  # 并行环境数量；越大采样越快，但显存和仿真负载也越高
-        num_one_step_observations = 45  # 单个时刻提供给策略的基础观测维度
+        num_one_step_observations = 46  # 单个时刻提供给策略的基础观测维度；额外加入 1 维高度命令
         num_observations = num_one_step_observations * 6  # 最终策略观测维度；这里表示堆叠 6 帧历史观测
-        num_one_step_privileged_obs = 45 + 3 + 3 + 187 # 单个时刻的特权观测维度；额外包含 base_lin_vel、external_forces、scan_dots
+        num_one_step_privileged_obs = 46 + 3 + 3 + 187 # 单个时刻的特权观测维度；额外包含 base_lin_vel、external_forces、scan_dots
         num_privileged_obs = num_one_step_privileged_obs * 1 # critic 使用的特权观测总维度；若为 None 则 step() 不返回 privileged_obs
         num_actions = 12  # 动作维度；对应 12 个可控关节
         env_spacing = 3.  # 环境间距；仅在 plane 这类简单地面上有意义，heightfield/trimesh 下通常不使用
@@ -16,7 +16,7 @@ class RCBlindTerrainCfg(LeggedRobotCfg):
 
     # 地形配置
     class terrain(LeggedRobotCfg.terrain):
-        mesh_type = 'trimesh' # 地形网格类型；这里使用三角网格地形，适合生成坡、楼梯、高台、坑洞等复杂盲走地形
+        mesh_type = 'plane' # 地形网格类型；这里使用三角网格地形，适合生成坡、楼梯、高台、坑洞等复杂盲走地形
         horizontal_scale = 0.1 # 地形横向分辨率，单位米；值越小，坡面边缘、踏块边界、沟壑轮廓会越细致
         vertical_scale = 0.005 # 地形纵向分辨率，单位米；值越小，高台、楼梯、坑洞的高度量化越精细
         border_size = 25 # 地形外围平地区域宽度，单位米；用于给整张训练地形留出边界缓冲，避免机器人刷在地图边缘
@@ -36,31 +36,33 @@ class RCBlindTerrainCfg(LeggedRobotCfg):
         num_rows= 10 # 地形难度层数；行数越多，课程学习的难度等级越细，最高难地形也会覆盖到更多层级，决定最高等级上限
         num_cols = 25 # 地形类型列数；列数越多，同一难度下可并行生成的坡、楼梯、高台、踏块、坑洞等类型越丰富
         # terrain types: [smooth slope, rough slope, stairs up/down, discrete obstacles, stepping stones, gaps, pits]
-        terrain_proportions = [0.1, 0.2, 0.2, 0.3, 0.2] # 各类地形生成比例；依次控制平滑坡、粗糙坡、上下楼梯、离散高台/方块障碍、踏石路、沟壑和坑洞在训练地图中的占比
+        terrain_proportions = [0.1, 0.2, 0.3, 0.2, 0.2] # 各类地形生成比例；依次控制平滑坡、粗糙坡、上下楼梯、离散高台/方块障碍、踏石路、沟壑和坑洞在训练地图中的占比
         # trimesh only:
         slope_treshold = 0.75 # 坡度修正阈值；超过该阈值的高度场边缘会更接近陡坎/立边，主要影响陡坡、台阶边和高台侧壁的形状
 
     # 指令采样配置
     class commands(LeggedRobotCfg.commands):
         curriculum = True # 是否启用指令课程学习；训练中逐渐放宽命令范围
-        max_curriculum = 0.8 # 指令课程学习的最大放宽尺度
-        num_commands = 4 # 指令维度；依次为 lin_vel_x、lin_vel_y、ang_vel_yaw、heading
+        max_curriculum = 1.0 # 指令课程学习的最大放宽尺度
+        num_commands = 5 # 指令维度；依次为 lin_vel_x、lin_vel_y、ang_vel_yaw、heading、base_height
         resampling_time = 10. # 指令重采样时间间隔，单位秒；每隔该时间重新抽样一次命令
         heading_command = True # 是否启用 heading 模式；开启后会由 heading 误差自动换算出 yaw 角速度命令
+        height_command = True # 是否启用高度命令；关闭后退回旧版 4 维命令和 45 维单帧 actor 观测
         class ranges( LeggedRobotCfg.commands.ranges):
-            lin_vel_x = [-0.8, 0.8] # 前向/后向线速度命令范围，单位 m/s
+            lin_vel_x = [-1.0, 1.0] # 前向/后向线速度命令范围，单位 m/s
             lin_vel_y = [-0.5, 0.5]   # 横向线速度命令范围，单位 m/s
             ang_vel_yaw = [-2.5, 2.5]    # 偏航角速度命令范围，单位 rad/s
             heading = [-3.14, 3.14]  # 目标朝向角范围，单位 rad；仅 heading_command=True 时有意义
+            height = [0.10, 0.26]  # 机身目标高度命令范围，单位米；平地训练围绕该范围跟踪
 
     # 初始状态配置
     class init_state(LeggedRobotCfg.init_state):
         pos = [0.0, 0.0, 0.42] # 机器人初始基座位置 [x, y, z]，单位米
         default_joint_angles = { # 默认关节角；当策略动作 action=0 时，各关节的目标角度就是这里的值
-            'FL_hip_joint': 0.1,   # 左前髋外展/内收关节默认角度，单位 rad
-            'RL_hip_joint': 0.1,   # 左后髋外展/内收关节默认角度，单位 rad
-            'FR_hip_joint': -0.1 ,  # 右前髋外展/内收关节默认角度，单位 rad
-            'RR_hip_joint': -0.1,   # 右后髋外展/内收关节默认角度，单位 rad
+            'FL_hip_joint': 0.,   # 左前髋外展/内收关节默认角度，单位 rad
+            'RL_hip_joint': 0.,   # 左后髋外展/内收关节默认角度，单位 rad
+            'FR_hip_joint': -0. ,  # 右前髋外展/内收关节默认角度，单位 rad
+            'RR_hip_joint': -0.,   # 右后髋外展/内收关节默认角度，单位 rad
 
             'FL_thigh_joint': 0.8,     # 左前大腿关节默认角度，单位 rad
             'RL_thigh_joint': 1.,   # 左后大腿关节默认角度，单位 rad
@@ -95,7 +97,7 @@ class RCBlindTerrainCfg(LeggedRobotCfg):
         privileged_contacts_on = ["base", "thigh", "calf"]  # 这些接触信息会作为 critic 的特权信息使用
         self_collisions = 1 # 自碰撞开关；1 表示禁用自碰撞，0 表示启用自碰撞
         flip_visual_attachments = False # 是否把部分视觉网格从 y-up 翻转到 z-up；取决于模型网格坐标系
-  
+
 
     # 域随机化配置
     class domain_rand(LeggedRobotCfg.domain_rand):
@@ -141,29 +143,33 @@ class RCBlindTerrainCfg(LeggedRobotCfg):
         class scales(LeggedRobotCfg.rewards.scales):
             termination = -0.0  # 终止惩罚权重；当前为 0，表示不单独惩罚失败终止
             tracking_lin_vel = 3.0  # 线速度跟踪奖励权重；鼓励机体跟踪给定 x/y 速度命令
-            tracking_ang_vel = 1.6  # 角速度跟踪奖励权重；鼓励机体跟踪给定 yaw 角速度命令
-            lin_vel_z = -1.3  # z 方向线速度惩罚权重；抑制机体上下乱跳
-            ang_vel_xy = -0.05  # x/y 方向角速度惩罚权重；抑制滚转和俯仰角速度过大
-            orientation = -1.4  # 姿态惩罚权重；鼓励机身保持接近平衡姿态
-            dof_acc = -8e-8  # 关节加速度惩罚权重；抑制关节剧烈加减速
-            joint_power = -1.5e-5  # 关节功率项权重；当前为 0，表示不启用功率约束
-            base_height = -8.0  # 机身高度惩罚权重；鼓励机身高度接近目标值
-            foot_clearance = -0.1  # 足端净空高度相关项权重；当前实现是对偏离目标高度的运动进行惩罚
-            action_rate = -0.007  # 动作变化率惩罚权重；抑制相邻两步动作变化过大
-            smoothness = -0.007  # 二阶平滑惩罚权重；抑制动作序列出现明显拐点和高频抖动
-            feet_air_time = 0.03  # 足端腾空时间奖励权重；鼓励形成更清晰的摆动相
-            collision = -0.15  # 碰撞惩罚权重；惩罚不希望发生接触的刚体碰撞
-            stumble = -0.3   # 绊腿惩罚权重；惩罚脚撞到近似垂直障碍物
-            stand_still = -1.0 # 静止站立惩罚权重；
-            torques = -3.0e-5  # 力矩惩罚权重；当前为 0，不约束关节输出力矩大小
-            dof_vel = -0.0  # 关节速度惩罚权重；当前为 0，不约束关节转速
+            tracking_ang_vel = 2.0  # 角速度跟踪奖励权重；鼓励机体跟踪给定 yaw 角速度命令
+            lin_vel_z = -1.8  # z 方向线速度惩罚权重；抑制机体上下乱跳
+            ang_vel_xy = -0.08  # x/y 方向角速度惩罚权重；抑制滚转和俯仰角速度过大
+            orientation = -0.6  # 姿态惩罚权重；鼓励机身保持接近平衡姿态
+            orientation_pitch = -1.2 # 俯仰角惩罚权重；鼓励机身保持接近平衡姿态
+            dof_acc = -2.5e-7  # 关节加速度惩罚权重；抑制关节剧烈加减速
+            joint_power = -2e-5  # 关节功率项权重；当前为 0，表示不启用功率约束
+            base_height = -3.0  # 机身高度惩罚权重；鼓励机身高度接近目标值
+            base_height_encourage = 2.0 # 机身高度鼓励奖励权重；鼓励机身高度接近目标值
+            foot_clearance = -0.25  # 足端净空高度相关项权重；当前实现是对偏离目标高度的运动进行惩罚
+            action_rate = -0.04  # 动作变化率惩罚权重；抑制相邻两步动作变化过大
+            smoothness = -0.02  # 二阶平滑惩罚权重；抑制动作序列出现明显拐点和高频抖动
+            feet_air_time = 0.0  # 足端腾空时间奖励权重；鼓励形成更清晰的摆动相
+            collision = -2.5  # 碰撞惩罚权重；惩罚不希望发生接触的刚体碰撞
+            stumble = -0.0  # 绊腿惩罚权重；惩罚脚撞到近似垂直障碍物
+            stand_still = -2.0 # 静止站立惩罚权重；
+            torques = -0.0001  # 力矩惩罚权重；当前为 0，不约束关节输出力矩大小
+            dof_vel = -2.5e-6  # 关节速度惩罚权重；当前为 0，不约束关节转速
             dof_pos_limits = -0.0  # 关节位置限位惩罚权重；当前为 0，不额外惩罚逼近位置极限
             dof_vel_limits = -0.0  # 关节速度限位惩罚权重；当前为 0，不额外惩罚逼近速度极限
             torque_limits = -0.12  # 力矩限位惩罚权重；惩罚逼近力矩极限
-            hip_abduction_deviation = -0.6  # 髋外展/内收关节偏离默认姿态惩罚权重；用于约束横向开腿过大
-            foot_drag = -0.01 # 足端拖地惩罚权重；鼓励足端在摆动相腾空，减少磨擦和能量损失
-            similar_legged = 0.1 #trot
+            hip_abduction_deviation = -0.8  # 髋外展/内收关节偏离默认姿态惩罚权重；用于约束横向开腿过大
+            foot_drag = -0.05 # 足端拖地惩罚权重；鼓励足端在摆动相腾空，减少磨擦和能量损失
 
+            similar_legged = 2.0 # 左右腿动作相似性惩罚权重；鼓励左右腿动作对称，减少不稳定的横向摆动
+            vel_y_zero_penalize = -0.1 # 横向速度为零惩罚权重；鼓励机器人在横向有一定速度，减少横向静止
+            low_height_thigh_horizontal = 1.0 
         only_positive_rewards = False # 是否把总奖励裁剪为非负；可避免训练早期大量负奖励导致学习不稳定
         tracking_sigma = 0.25 # 速度跟踪奖励的高斯宽度；越小表示对跟踪误差越敏感
         soft_dof_pos_limit = 0.9 # 软位置限位比例；超过 URDF 极限 90% 后开始进入惩罚区
@@ -171,13 +177,14 @@ class RCBlindTerrainCfg(LeggedRobotCfg):
         soft_torque_limit = 0.9  # 软力矩限位比例；超过力矩极限 90% 后开始进入惩罚区
         base_height_target = 0.26  # 机身目标高度，单位米；base_height 奖励围绕该值计算
         max_contact_force = 100. # 最大允许接触力阈值；超过后可进入接触力惩罚
-        clearance_height_target = -0.18  # 足端目标净空高度，单位米；foot_clearance 奖励围绕该值计算
+        clearance_height_target = -0.16  # 足端目标净空高度，单位米；foot_clearance 奖励围绕该值计算
 
     # 观测与动作归一化配置
     class normalization(LeggedRobotCfg.normalization):
         class obs_scales(LeggedRobotCfg.normalization.obs_scales):
             lin_vel = 2.0  # 线速度观测缩放系数
             ang_vel = 0.25  # 角速度观测缩放系数
+            height = 4.0  # 高度命令观测缩放系数
             dof_pos = 1.0  # 关节位置观测缩放系数
             dof_vel = 0.05  # 关节速度观测缩放系数
             height_measurements = 5.0  # 地形高度观测缩放系数
@@ -223,7 +230,7 @@ class RCBlindTerrainCfg(LeggedRobotCfg):
             contact_collection = 2 # 接触采集模式；0 从不采集，1 仅最后子步，2 采集所有子步
 
 # PPO 训练配置
-class RCBlindTerrainCfgPPO(LeggedRobotCfgPPO):
+class RCBlindPlaneCfgPPO(LeggedRobotCfgPPO):
     seed = 1  # 随机种子；用于保证训练可复现性
     runner_class_name = 'HIMOnPolicyRunner'  # 训练 runner 类名；指定使用哪种训练驱动器
     class policy( LeggedRobotCfgPPO.policy ):
@@ -261,10 +268,10 @@ class RCBlindTerrainCfgPPO(LeggedRobotCfgPPO):
 
         # logging
         save_interval = 100 # 模型保存检查间隔；每这么多次迭代检查一次是否保存
-        experiment_name = 'blindrough3'  # 实验名称；决定日志主目录名
+        experiment_name = 'blindplane'  # 实验名称；决定日志主目录名
         run_name = ''  # 当前运行名称；会拼接到日志目录名后面
         # load and resume
-        resume = True  # 是否从已有 checkpoint 恢复训练
+        resume = False  # 是否从已有 checkpoint 恢复训练
         load_run = -1 # 要加载的 run；-1 表示自动选择最新 run
         checkpoint = -1 # 要加载的 checkpoint；-1 表示自动选择最新 checkpoint
         resume_path = None # 恢复路径；通常由 load_run 和 checkpoint 自动解析生成

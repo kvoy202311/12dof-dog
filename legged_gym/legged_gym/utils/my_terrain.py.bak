@@ -107,44 +107,48 @@ class Terrain:
             self.add_terrain_to_map(terrain, i, j)
     
     def make_terrain(self, choice, difficulty):
+        # 生成单块子地形；choice 决定地形类别，difficulty 决定同类别下的难度强度。
         terrain = terrain_utils.SubTerrain(   "terrain",
                                 width=self.width_per_env_pixels,
                                 length=self.width_per_env_pixels,
                                 vertical_scale=self.cfg.vertical_scale,
                                 horizontal_scale=self.cfg.horizontal_scale)
-        slope = difficulty * 0.4
-        amplitude = 0.01 + 0.07 * difficulty
-        # step_height = 0.20
-        step_height = 0.05 + 0.20 * difficulty
-        discrete_obstacles_height = 0.05 + difficulty * 0.1
-        stepping_stones_size = 1.5 * (1.05 - difficulty)
-        stone_distance = 0.05 if difficulty==0 else 0.1
-        gap_size = 1. * difficulty
-        pit_depth = 1. * difficulty
+        slope = difficulty * 0.6 # 坡度强度；用于平滑坡和粗糙坡，值越大表示上坡/下坡/侧坡越陡
+        amplitude = 0.02 + 0.13 * difficulty # 粗糙起伏高度；用于 rough slope，在坡面上叠加随机高低不平扰动
+        step_height = 0.05 + 0.2 * difficulty # 台阶高度；用于上楼梯和下楼梯，值越大表示每一级台阶越高
+        discrete_obstacles_height = 0.05 + difficulty * 0.12 # 离散障碍高度；用于高台、方块障碍、碎石块一类离散凸起地形
+        stepping_stones_size = 0.8 * (1.0 - difficulty) # 踏石尺寸；用于 stepping stones，难度越高，单块可落脚区域越小
+        stone_distance = 0.05 if difficulty==0 else 0.1 # 踏石间距；用于 stepping stones，控制相邻石块之间需要跨越的水平距离
+        gap_size = 1.2 * difficulty # 沟壑宽度；用于 gap terrain，值越大表示需要跨越的断裂区域越宽
+        pit_depth = 1.2 * difficulty # 坑洞深度；用于 pit terrain，值越大表示踩空后的落差越深
         if choice < self.proportions[0]:
-            # plane
-            terrain_utils.pyramid_sloped_terrain(terrain, slope=0, platform_size=3.)
-        if choice < self.proportions[1]:
-            if choice < self.proportions[1]/ 2:
+            # 第一类地形：平滑金字塔坡；一半概率是上坡，一半概率是下坡
+            if choice < self.proportions[0]/ 2:
                 slope *= -1
             terrain_utils.pyramid_sloped_terrain(terrain, slope=slope, platform_size=3.)
-        elif choice < self.proportions[2]:
+        elif choice < self.proportions[1]:
+            # 第二类地形：粗糙坡；先生成大坡面，再叠加随机起伏，常用于模拟碎石坡/不平斜坡
             terrain_utils.pyramid_sloped_terrain(terrain, slope=slope, platform_size=3.)
             terrain_utils.random_uniform_terrain(terrain, min_height=-amplitude, max_height=amplitude, step=0.005, downsampled_scale=0.2)
-        elif choice < self.proportions[4]:
-            if choice<self.proportions[3]:
+        elif choice < self.proportions[3]:
+            # 第三、四类地形：金字塔楼梯；前半段生成下楼梯，后半段生成上楼梯
+            if choice<self.proportions[2]:
                 step_height *= -1
-            terrain_utils.pyramid_stairs_terrain(terrain, step_width=0.40, step_height=step_height, platform_size=3.)
-        elif choice < self.proportions[5]:
+            terrain_utils.pyramid_stairs_terrain(terrain, step_width=0.30, step_height=step_height, platform_size=3.)
+        elif choice < self.proportions[4]:
+            # 第五类地形：离散障碍；在平地区域撒布多个矩形高台/方块障碍，考察抬腿与落脚精度
             num_rectangles = 20
             rectangle_min_size = 1.
             rectangle_max_size = 2.
             terrain_utils.discrete_obstacles_terrain(terrain, discrete_obstacles_height, rectangle_min_size, rectangle_max_size, num_rectangles, platform_size=3.)
-        elif choice < self.proportions[6]:
+        elif choice < self.proportions[5]:
+            # 第六类地形：踏石路；由一系列可落脚石块组成，主要考察落脚点选择和跨步精度
             terrain_utils.stepping_stones_terrain(terrain, stone_size=stepping_stones_size, stone_distance=stone_distance, max_height=0., platform_size=4.)
-        elif choice < self.proportions[7]:
+        elif choice < self.proportions[6]:
+            # 第七类地形：沟壑；中间挖出需要直接跨越的缺口区域
             gap_terrain(terrain, gap_size=gap_size, platform_size=3.)
         else:
+            # 第八类地形：坑洞；平台周围存在下陷区域，主要考察边缘感知和避免踩空的能力
             pit_terrain(terrain, depth=pit_depth, platform_size=4.)
         
         return terrain

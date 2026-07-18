@@ -118,6 +118,63 @@ class RCBlindTerrain(LeggedRobot):
         self.friction_coeffs = torch.ones(self.num_envs, 1, dtype=torch.float, device=self.device, requires_grad=False)
         self.restitution_coeffs = torch.zeros(self.num_envs, 1, dtype=torch.float, device=self.device, requires_grad=False)
 
+
+    def step(self, actions):
+        """ Apply actions, simulate, call self.post_physics_step()
+
+        Args:
+            actions (torch.Tensor): Tensor of shape (num_envs, num_actions_per_env)
+        """
+        clip_actions = self.cfg.normalization.clip_actions
+        self.actions = torch.clip(actions, -clip_actions, clip_actions).to(self.device)
+
+        self.delayed_actions = self.actions.clone().view(self.num_envs, 1, self.num_actions).repeat(1, self.cfg.control.decimation, 1)
+        ##################delay加1仿真步（0.005s）##################
+        delay_steps = torch.randint(0, self.cfg.control.decimation + 1, (self.num_envs, 1), device=self.device)
+        if self.cfg.domain_rand.delay:
+            for i in range(self.cfg.control.decimation):
+                self.delayed_actions[:, i] = self.last_actions + (self.actions - self.last_actions) * (i >= delay_steps)
+        # step physics and render each frame
+        self.render()
+        for _ in range(self.cfg.control.decimation):
+            self.torques = self._compute_torques(self.delayed_actions[:, _]).view(self.torques.shape)
+            self.gym.set_dof_actuation_force_tensor(self.sim, gymtorch.unwrap_tensor(self.torques))
+            self.gym.simulate(self.sim)
+            if self.device == 'cpu':
+                self.gym.fetch_results(self.sim, True)
+            self.gym.refresh_dof_state_tensor(self.sim)
+        termination_ids, termination_priveleged_obs = self.post_physics_step()
+
+        # return clipped obs, clipped states (None), rewards, dones and infos
+        clip_obs = self.cfg.normalization.clip_observations
+        self.obs_buf = torch.clip(self.obs_buf, -clip_obs, clip_obs)
+        if self.privileged_obs_buf is not None:
+            self.privileged_obs_buf = torch.clip(self.privileged_obs_buf, -clip_obs, clip_obs)
+        return self.obs_buf, self.privileged_obs_buf, self.rew_buf, self.reset_buf, self.extras, termination_ids, termination_priveleged_obs
+
+    def _update_terrain_curriculum(self, env_ids):
+        """ Implements the game-inspired curriculum.
+
+        Args:
+            env_ids (List[int]): ids of environments being reset
+        """
+        # Implement Terrain curriculum
+        if not self.init_done:
+            # don't change on initial reset
+            return
+        distance = torch.norm(self.root_states[env_ids, :2] - self.env_origins[env_ids, :2], dim=1)
+        # robots that walked far enough progress to harder terains
+        move_up = distance > self.terrain.env_length * 0.5
+        # robots that walked less than half of their required distance go to simpler terrains
+        move_down = (distance < torch.norm(self.commands[env_ids, :2], dim=1)*self.max_episode_length_s*0.5) * ~move_up
+        self.terrain_levels[env_ids] += 1 * move_up - 1 * move_down
+        # Robots that solve the last level are sent to a random one
+        self.terrain_levels[env_ids] = torch.where(self.terrain_levels[env_ids]>=self.max_terrain_level,
+                                                   torch.randint_like(self.terrain_levels[env_ids], self.max_terrain_level),
+                                                   torch.clip(self.terrain_levels[env_ids], 0)) # (the minumum level is zero)
+        self.env_origins[env_ids] = self.terrain_origins[self.terrain_levels[env_ids], self.terrain_types[env_ids]]
+    
+
     ################################REWARD FUNCTIONS#################################
     #腾空时间阈值改成了0.1s
     def _reward_feet_air_time(self):
@@ -485,3 +542,11 @@ class RCBlindTerrain(LeggedRobot):
         # 放松系数最小保留到 0.2，避免该项奖励完全失效
         relax = 1.0 - 0.8 * relax_strength
         return 10 * penalty * relax
+    
+    def _reward_similar_legged(self):
+        # 鼓励前右腿-后左腿、前左腿-后右腿动作一致，避免出现三条腿运动同时一条腿腾空
+        legged_error_fr_rl = torch.sum(torch.square(self.dof_pos[:,0:3] - self.dof_pos[:,9:12]), dim=1)
+        legged_error_fl_rr = torch.sum(torch.square(self.dof_pos[:,3:6] - self.dof_pos[:,6:9]), dim=1)
+        legged_error = legged_error_fl_rr + legged_error_fr_rl
+        similar_legged_sigma = 0.1
+        return torch.exp(-legged_error / similar_legged_sigma)
